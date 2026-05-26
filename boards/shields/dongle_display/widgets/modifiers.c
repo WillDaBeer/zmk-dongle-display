@@ -57,9 +57,9 @@ struct modifier_symbol ms_cmd = {
 
 struct modifier_symbol *modifier_symbols[] = {
     // this order determines the order of the symbols
-    &ms_control,
-    &ms_opt,
     &ms_cmd,
+    &ms_opt,
+    &ms_control,
     &ms_shift
 };
 #else
