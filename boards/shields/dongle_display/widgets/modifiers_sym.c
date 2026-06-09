@@ -74,6 +74,41 @@ const lv_img_dsc_t shift_icon = {
   .data = shift_map,
 };
 
+#ifndef LV_ATTRIBUTE_IMG_SHIFT_FILLED
+#define LV_ATTRIBUTE_IMG_SHIFT_FILLED
+#endif
+
+/* Caps-word variant of shift_icon: the same 14x14 arrow with its interior
+ * flooded solid, used by the modifiers widget while &caps_ind is active.
+ * Bitmap is shift_map's own enclosed region filled, so the silhouette matches. */
+const LV_ATTRIBUTE_MEM_ALIGN LV_ATTRIBUTE_LARGE_CONST LV_ATTRIBUTE_IMG_SHIFT_FILLED uint8_t shift_filled_map[] = {
+  0xff, 0xff, 0xff, 0xff, 	/*Color of index 0*/
+  0x00, 0x00, 0x00, 0xff, 	/*Color of index 1*/
+
+  0x00, 0x00,
+  0x00, 0x00,
+  0x03, 0x00,
+  0x07, 0x80,
+  0x0f, 0xc0,
+  0x1f, 0xe0,
+  0x3f, 0xf0,
+  0x7f, 0xf8,
+  0x0f, 0xc0,
+  0x0f, 0xc0,
+  0x0f, 0xc0,
+  0x0f, 0xc0,
+  0x00, 0x00,
+  0x00, 0x00,
+};
+
+const lv_img_dsc_t shift_filled_icon = {
+  .header.cf = LV_COLOR_FORMAT_I1,
+  .header.w = 14,
+  .header.h = 14,
+  .data_size = 36,
+  .data = shift_filled_map,
+};
+
 #ifndef LV_ATTRIBUTE_IMG_ALT
 #define LV_ATTRIBUTE_IMG_ALT
 #endif

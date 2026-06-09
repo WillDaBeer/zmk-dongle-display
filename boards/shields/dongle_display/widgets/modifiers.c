@@ -18,6 +18,13 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include "modifiers.h"
 
+#if IS_ENABLED(CONFIG_ZMK_DONGLE_DISPLAY_CAPSWORD)
+// Provided by the config repo module (config/include/caps_word_ind.h), exposed
+// on the global include path via its zephyr_include_directories(include).
+#include "caps_word_ind.h"
+LV_IMG_DECLARE(shift_filled_icon);
+#endif
+
 struct modifiers_state {    
     uint8_t modifiers;
 };
@@ -103,6 +110,41 @@ static void move_object_y(void *obj, int32_t from, int32_t to) {
     lv_anim_start(&a);
 }
 
+#if IS_ENABLED(CONFIG_ZMK_DONGLE_DISPLAY_CAPSWORD)
+// Swap the shift symbol's image between the outline (shift_icon) and filled
+// (shift_filled_icon) variants based on &caps_ind state. Independent of the
+// held-shift up/down + underline logic in set_modifiers(), so normal shift
+// indication is unaffected. Idempotent: only touches the image when it changes.
+//
+// Threading: caps-word activation isn't a keycode event the modifiers listener
+// hears, so we poll the flag on a k_timer. But the timer callback runs in
+// system-timer context and LVGL is single-threaded, so the callback only
+// SUBMITS to ZMK's display work queue; the lv_img_set_src() runs there.
+static bool caps_word_shown = false;
+
+static void caps_word_work_cb(struct k_work *work) {
+    bool caps = caps_word_ind_is_active();
+    if (caps == caps_word_shown) {
+        return;
+    }
+    caps_word_shown = caps;
+
+    const lv_img_dsc_t *src = caps ? &shift_filled_icon : &shift_icon;
+    ms_shift.symbol_dsc = src;
+    if (ms_shift.symbol != NULL) {
+        lv_img_set_src(ms_shift.symbol, src);
+    }
+}
+
+static K_WORK_DEFINE(caps_word_work, caps_word_work_cb);
+
+static void caps_word_timer_cb(struct k_timer *timer) {
+    k_work_submit_to_queue(zmk_display_work_q(), &caps_word_work);
+}
+
+static K_TIMER_DEFINE(caps_word_timer, caps_word_timer_cb, NULL);
+#endif
+
 static void set_modifiers(lv_obj_t *widget, struct modifiers_state state) {
     for (int i = 0; i < NUM_SYMBOLS; i++) {
         bool mod_is_active = state.modifiers & modifier_symbols[i]->modifier;
@@ -160,6 +202,11 @@ int zmk_widget_modifiers_init(struct zmk_widget_modifiers *widget, lv_obj_t *par
     sys_slist_append(&widgets, &widget->node);
 
     widget_modifiers_init();
+
+#if IS_ENABLED(CONFIG_ZMK_DONGLE_DISPLAY_CAPSWORD)
+    // Poll &caps_ind state every 100ms to drive the shift frame<->filled swap.
+    k_timer_start(&caps_word_timer, K_MSEC(100), K_MSEC(100));
+#endif
 
     return 0;
 }

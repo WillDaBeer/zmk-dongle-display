@@ -33,6 +33,15 @@ config ZMK_DONGLE_DISPLAY_MODIFIERS
     bool "Display the modifiers widget"
     default y
 
+config ZMK_DONGLE_DISPLAY_CAPSWORD
+    bool "Show caps-word by filling the shift glyph (requires &caps_ind in keymap)"
+    depends on ZMK_DONGLE_DISPLAY_MODIFIERS
+    help
+        While the &caps_ind behavior (zmk,behavior-caps-word-ind, provided by the
+        config repo) is active, the modifiers widget swaps the shift glyph from its
+        outline to a filled variant. Requires the keymap to bind &caps_ind and the
+        config module's caps_word_ind.h on the include path.
+
 config ZMK_DONGLE_DISPLAY_LAYER
     bool "Display the highest layer widget"
     default y
