@@ -22,6 +22,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 // Provided by the config repo module (config/include/caps_word_ind.h), exposed
 // on the global include path via its zephyr_include_directories(include).
 #include "caps_word_ind.h"
+#include <zmk/hid_indicators.h> // host caps-lock LED state on the central
 LV_IMG_DECLARE(shift_filled_icon);
 #endif
 
@@ -111,28 +112,46 @@ static void move_object_y(void *obj, int32_t from, int32_t to) {
 }
 
 #if IS_ENABLED(CONFIG_ZMK_DONGLE_DISPLAY_CAPSWORD)
-// Swap the shift symbol's image between the outline (shift_icon) and filled
-// (shift_filled_icon) variants based on &caps_ind state. Independent of the
-// held-shift up/down + underline logic in set_modifiers(), so normal shift
-// indication is unaffected. Idempotent: only touches the image when it changes.
+// Three-state shift-symbol indicator (mirrors the YADS caps_word_status idea):
+//   off       -> shift_icon (frame/outline), no box
+//   caps-word -> shift_filled_icon (full), no box
+//   caps-lock -> shift_filled_icon + a box drawn around the symbol (caps-lock
+//                takes priority if both are somehow active)
+// Independent of the held-shift up/down + underline logic in set_modifiers(),
+// so normal shift indication is unaffected. Idempotent: only redraws on change.
 //
-// Threading: caps-word activation isn't a keycode event the modifiers listener
-// hears, so we poll the flag on a k_timer. But the timer callback runs in
-// system-timer context and LVGL is single-threaded, so the callback only
-// SUBMITS to ZMK's display work queue; the lv_img_set_src() runs there.
-static bool caps_word_shown = false;
+// Threading: neither caps-word activation nor host caps-lock changes are a
+// keycode event the modifiers listener hears, so we poll on a k_timer. The
+// timer callback runs in system-timer context and LVGL is single-threaded, so
+// it only SUBMITS to ZMK's display work queue; the lv_* calls run there.
+
+// HID keyboard LED report bit for caps-lock (USB HID spec; matches LED_CLCK in
+// the hid_indicators widget). Read on the central via the host LED state.
+#define LED_CAPS_LOCK 0x02
+
+static inline bool caps_lock_active(void) {
+    return (zmk_hid_indicators_get_current_profile() & LED_CAPS_LOCK) != 0;
+}
+
+// -1 = uninitialised so the first poll always draws. Else 0/1/2 = off/word/lock.
+static int caps_state_shown = -1;
 
 static void caps_word_work_cb(struct k_work *work) {
-    bool caps = caps_word_ind_is_active();
-    if (caps == caps_word_shown) {
+    int state = caps_lock_active() ? 2 : (caps_word_ind_is_active() ? 1 : 0);
+    if (state == caps_state_shown) {
         return;
     }
-    caps_word_shown = caps;
+    caps_state_shown = state;
 
-    const lv_img_dsc_t *src = caps ? &shift_filled_icon : &shift_icon;
+    // Arrow: frame for off, filled for word/lock.
+    const lv_img_dsc_t *src = (state == 0) ? &shift_icon : &shift_filled_icon;
     ms_shift.symbol_dsc = src;
     if (ms_shift.symbol != NULL) {
         lv_img_set_src(ms_shift.symbol, src);
+
+        // Box: only for caps-lock (state 2). border colour/radius are set once
+        // in init; here we just toggle the border width on/off.
+        lv_obj_set_style_border_width(ms_shift.symbol, (state == 2) ? 1 : 0, 0);
     }
 }
 
@@ -204,7 +223,16 @@ int zmk_widget_modifiers_init(struct zmk_widget_modifiers *widget, lv_obj_t *par
     widget_modifiers_init();
 
 #if IS_ENABLED(CONFIG_ZMK_DONGLE_DISPLAY_CAPSWORD)
-    // Poll &caps_ind state every 100ms to drive the shift frame<->filled swap.
+    // Pre-set the caps-lock box style on the shift symbol: white border + small
+    // radius, but width 0 so it's invisible until caps-lock toggles it on (the
+    // work callback flips border_width to draw the box). Small negative pad so
+    // the border sits just outside the 14px glyph rather than clipping it.
+    lv_obj_set_style_border_color(ms_shift.symbol, lv_color_white(), 0);
+    lv_obj_set_style_radius(ms_shift.symbol, 2, 0);
+    lv_obj_set_style_pad_all(ms_shift.symbol, 1, 0);
+    lv_obj_set_style_border_width(ms_shift.symbol, 0, 0);
+
+    // Poll every 100ms to drive the off/caps-word/caps-lock shift indicator.
     k_timer_start(&caps_word_timer, K_MSEC(100), K_MSEC(100));
 #endif
 
