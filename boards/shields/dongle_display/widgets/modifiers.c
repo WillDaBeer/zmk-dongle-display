@@ -112,11 +112,12 @@ static void move_object_y(void *obj, int32_t from, int32_t to) {
 }
 
 #if IS_ENABLED(CONFIG_ZMK_DONGLE_DISPLAY_CAPSWORD)
-// Three-state shift-symbol indicator (mirrors the YADS caps_word_status idea):
-//   off       -> shift_icon (frame/outline), no box
-//   caps-word -> shift_filled_icon (full), no box
-//   caps-lock -> shift_filled_icon + a box drawn around the symbol (caps-lock
-//                takes priority if both are somehow active)
+// Two-state shift-symbol indicator:
+//   off                      -> shift_icon (frame/outline)
+//   caps-word OR caps-lock    -> shift_filled_icon (full)
+// TOTEM's shift symbol is a 14x14 image (not a font glyph), and a per-state box
+// was tried but its border/padding displaced the symbol and misaligned the mod
+// row — so caps-word and caps-lock share the filled arrow (no distinction).
 // Independent of the held-shift up/down + underline logic in set_modifiers(),
 // so normal shift indication is unaffected. Idempotent: only redraws on change.
 //
@@ -133,25 +134,24 @@ static inline bool caps_lock_active(void) {
     return (zmk_hid_indicators_get_current_profile() & LED_CAPS_LOCK) != 0;
 }
 
-// -1 = uninitialised so the first poll always draws. Else 0/1/2 = off/word/lock.
-static int caps_state_shown = -1;
+// Two states: frame (off) / filled (caps-word OR caps-lock). TOTEM's shift
+// symbol is a 14x14 image, not a font glyph, so there is no caps-lock-specific
+// arrow; both caps modes show the filled arrow. (A box was tried but its
+// border/padding displaced the 14px symbol and misaligned the row, so it was
+// dropped.)
+static bool caps_shown = false;
 
 static void caps_word_work_cb(struct k_work *work) {
-    int state = caps_lock_active() ? 2 : (caps_word_ind_is_active() ? 1 : 0);
-    if (state == caps_state_shown) {
+    bool fill = caps_word_ind_is_active() || caps_lock_active();
+    if (fill == caps_shown) {
         return;
     }
-    caps_state_shown = state;
+    caps_shown = fill;
 
-    // Arrow: frame for off, filled for word/lock.
-    const lv_img_dsc_t *src = (state == 0) ? &shift_icon : &shift_filled_icon;
+    const lv_img_dsc_t *src = fill ? &shift_filled_icon : &shift_icon;
     ms_shift.symbol_dsc = src;
     if (ms_shift.symbol != NULL) {
         lv_img_set_src(ms_shift.symbol, src);
-
-        // Box: only for caps-lock (state 2). border colour/radius are set once
-        // in init; here we just toggle the border width on/off.
-        lv_obj_set_style_border_width(ms_shift.symbol, (state == 2) ? 1 : 0, 0);
     }
 }
 
@@ -223,16 +223,8 @@ int zmk_widget_modifiers_init(struct zmk_widget_modifiers *widget, lv_obj_t *par
     widget_modifiers_init();
 
 #if IS_ENABLED(CONFIG_ZMK_DONGLE_DISPLAY_CAPSWORD)
-    // Pre-set the caps-lock box style on the shift symbol: white border + small
-    // radius, but width 0 so it's invisible until caps-lock toggles it on (the
-    // work callback flips border_width to draw the box). Small negative pad so
-    // the border sits just outside the 14px glyph rather than clipping it.
-    lv_obj_set_style_border_color(ms_shift.symbol, lv_color_white(), 0);
-    lv_obj_set_style_radius(ms_shift.symbol, 2, 0);
-    lv_obj_set_style_pad_all(ms_shift.symbol, 1, 0);
-    lv_obj_set_style_border_width(ms_shift.symbol, 0, 0);
-
-    // Poll every 100ms to drive the off/caps-word/caps-lock shift indicator.
+    // Poll every 100ms to drive the frame<->filled shift indicator (caps-word
+    // or caps-lock -> filled). No box styling here: it displaced the symbol.
     k_timer_start(&caps_word_timer, K_MSEC(100), K_MSEC(100));
 #endif
 
